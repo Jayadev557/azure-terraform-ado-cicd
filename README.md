@@ -1,130 +1,163 @@
-# Azure DevOps + Terraform CI/CD — Learning Notes
+# Azure Terraform ADO CI/CD
 
-## 1. Project Structure
+This is a learning project to practice **Terraform, Azure, and Azure DevOps CI/CD pipelines**.
+
+The project creates Azure infrastructure using reusable Terraform modules and deploys it through an Azure DevOps pipeline.
+
+---
+
+## Architecture
+
+The basic CI/CD flow is:
 
 ```text
-proj_infra_001/
-│
-├── environment/
-│   ├── preprod/
+Developer
+    |
+    v
+Feature Branch
+    |
+    v
+Pull Request
+    |
+    v
+Azure DevOps Build Validation
+    |
+    +-- Terraform Format
+    +-- Terraform Init
+    +-- Terraform Validate
+    +-- Checkov Security Scan
+    +-- Terraform Plan
+    |
+    v
+PR Approval
+    |
+    v
+Merge to main
+    |
+    v
+Deployment Pipeline
+    |
+    v
+Preprod Environment
+    |
+    v
+Manual Approval
+    |
+    v
+Terraform Apply
+    |
+    v
+Azure Resources
+```
+
+### High-Level Components
+
+```text
++----------------------+
+|     Azure Repos      |
+|                      |
+| Feature Branch / PR  |
++----------+-----------+
+           |
+           v
++----------------------+
+|    Azure Pipeline    |
+|                      |
+| fmt / init /         |
+| validate / Checkov / |
+| plan                 |
++----------+-----------+
+           |
+           v
++----------------------+
+| Terraform-preprod    |
+| Azure DevOps         |
+| Environment          |
+|                      |
+| Manual Approval      |
++----------+-----------+
+           |
+           v
++----------------------+
+|        Azure         |
+|                      |
+| Resource Group       |
+| Storage Account      |
++----------------------+
+```
+
+---
+
+## What I am Learning
+
+* Terraform basics
+* Terraform modules
+* Terraform remote state
+* Azure DevOps YAML pipelines
+* Git feature branches
+* Pull Requests
+* Branch policies
+* Terraform validation and planning
+* Checkov security scanning
+* Azure RBAC
+* Azure DevOps Environments
+* Manual approvals
+* Terraform deployment
+* CI/CD best practices
+
+---
+
+## Project Structure
+
+```text
+.
+├── environment
+│   ├── preprod
 │   │   ├── main.tf
 │   │   ├── provider.tf
 │   │   ├── terraform.tfvars
 │   │   └── variable.tf
 │   │
-│   └── prod/
+│   └── prod
 │       ├── main.tf
 │       ├── provider.tf
 │       ├── terraform.tfvars
 │       └── variable.tf
 │
-├── module/
-│   ├── azurerm_resource_group/
+├── module
+│   ├── azurerm_resource_group
 │   │   ├── main.tf
 │   │   └── variable.tf
 │   │
-│   └── azurerm_storage_account/
+│   └── azurerm_storage_account
 │       ├── main.tf
 │       └── variable.tf
 │
-└── pipelines/
+└── pipelines
     └── azure-pipelines.yml
 ```
 
-Pipeline YAML ko Git repository mein rakhna better hai because pipeline configuration bhi version-controlled rahegi.
-
 ---
 
-# 2. Branching Strategy
+## Terraform
 
-Learning project mein feature branch + PR flow use kiya:
+The project uses reusable Terraform modules for:
 
-```text
-feature/terraform-pipeline
-            ↓
-          PR
-            ↓
-           main
-```
+* Azure Resource Group
+* Azure Storage Account
 
-PR create karne se pehle feature branch par changes commit/push:
+Separate environment folders are used for:
 
-```powershell
-git add .
-git commit -m "Update pipeline"
-git push origin feature/terraform-pipeline
-```
+* Preprod
+* Prod
 
----
+This keeps environment-specific configuration separate from reusable Terraform modules.
 
-# 3. Azure DevOps Setup
+### Remote State
 
-### Service Connection
+Terraform state is stored remotely in an Azure Storage Account using the AzureRM backend.
 
-Service connection:
-
-```text
-jdpipeline
-```
-
-Authentication:
-
-```text
-Workload Identity Federation
-```
-
-### Agent
-
-Self-hosted Windows agent:
-
-```text
-Pool: jdpipelinepool
-```
-
-Agent machine par required tools installed:
-
-```text
-Terraform 1.12.2
-Azure CLI 2.89.0
-Checkov 3.2.450
-Git 2.41.0
-```
-
-### Environment
-
-ADO Environment:
-
-```text
-terraform-preprod
-```
-
-Is environment par approval configured kiya gaya.
-
----
-
-# 4. PR Branch Policy
-
-`main` branch par branch policy configure ki:
-
-```text
-Require PR
-Build Validation
-Approver required
-```
-
-Iska purpose:
-
-```text
-Feature branch → PR → Validation → Approval → Merge
-```
-
-PR validation successful hue bina main mein merge allowed nahi hoga.
-
----
-
-# 5. Terraform Backend
-
-Terraform state Azure Storage Account mein store kiya:
+Example:
 
 ```hcl
 backend "azurerm" {
@@ -135,74 +168,243 @@ backend "azurerm" {
 }
 ```
 
-Important:
-
-Terraform state ko Git mein commit nahi karna chahiye.
+Remote state helps keep Terraform state outside the Git repository.
 
 ---
 
-# 6. First Major Error — Backend 403
+## CI/CD Pipeline
 
-Error:
+The pipeline has two main stages.
+
+### 1. Validation and Plan
+
+This stage runs when code is validated through a Pull Request.
+
+It performs:
 
 ```text
-403 Forbidden
-
-does not have authorization to perform action:
-Microsoft.Storage/storageAccounts/read
+terraform fmt
+        |
+terraform init
+        |
+terraform validate
+        |
+Checkov scan
+        |
+terraform plan
 ```
 
-### Cause
+The purpose is to catch formatting issues, Terraform errors, and security problems before merging code.
 
-ADO service connection ki identity ko backend Storage Account read karne ki permission nahi thi.
+### 2. Deployment
 
-### Fix
+After the Pull Request is approved and merged into `main`, the deployment stage runs.
 
-Service connection ki identity ko appropriate Azure RBAC permission di.
+The deployment uses the Azure DevOps environment:
 
-Backend storage ke liye required access ensure kiya.
+```text
+terraform-preprod
+```
+
+A manual approval is required before Terraform Apply.
+
+```text
+main
+ |
+ v
+Deployment
+ |
+ v
+terraform-preprod
+ |
+ v
+Manual Approval
+ |
+ v
+terraform apply
+```
 
 ---
 
-# 7. Second Major Error — Resource Group 403
+## Git Workflow
 
-Error:
+This project uses a feature branch workflow.
 
-```text
-does not have authorization to perform action:
-Microsoft.Resources/subscriptions/resourceGroups/read
-```
-
-Identity/Object ID:
+Example feature branch:
 
 ```text
-3412fc7b-250e-42b8-b92b-00da9d9fd644
+feature/terraform-pipeline
 ```
 
-### Cause
+After making changes:
 
-Pipeline ki service principal identity ke paas Resource Group ko read/create/manage karne ki required permission nahi thi.
+```bash
+git status
 
-### Fix
+git add .
 
-Azure Subscription ke IAM mein service connection identity ko:
+git commit -m "Update Terraform pipeline"
+
+git push origin feature/terraform-pipeline
+```
+
+Then create a Pull Request:
 
 ```text
-Role: Contributor
-Scope: Subscription
+feature/terraform-pipeline
+              |
+              v
+             PR
+              |
+              v
+             main
 ```
 
-diya.
+The `main` branch has branch policies enabled.
 
-RBAC propagation ke baad pipeline rerun ki.
+The validation pipeline must pass before the Pull Request can be merged.
 
 ---
 
-# 8. Checkov Security Scan
+## Prerequisites
 
-Initially Checkov mein multiple failures aaye.
+The following tools are required on the self-hosted agent:
+
+* Git
+* Terraform
+* Azure CLI
+* Checkov
+* Azure DevOps self-hosted agent
+
+Example versions used during this project:
+
+```text
+Terraform 1.12.2
+Azure CLI 2.89.0
+Checkov 3.2.450
+Git 2.41.0
+```
+
+The versions may be different in another environment.
+
+---
+
+## Azure DevOps Configuration
+
+The project uses the following Azure DevOps components:
+
+```text
+Agent Pool:
+jdpipelinepool
+
+Service Connection:
+jdpipeline
+
+Authentication:
+Workload Identity Federation
+
+Environment:
+terraform-preprod
+```
+
+The service connection is used by Terraform to authenticate with Azure.
+
+The Azure DevOps service connection identity must have the required Azure RBAC permissions.
+
+---
+
+## Deployment Steps
+
+### Step 1 — Create Feature Branch
+
+```bash
+git checkout -b feature/my-change
+```
+
+### Step 2 — Make Terraform Changes
+
+Update the required Terraform files.
+
+### Step 3 — Format Terraform
+
+```bash
+terraform fmt -recursive
+```
+
+### Step 4 — Run Validation
+
+```bash
+terraform init
+terraform validate
+```
+
+### Step 5 — Run Checkov
+
+```bash
+checkov -d .
+```
+
+If the project has documented exceptions:
+
+```bash
+checkov -d . --skip-check <CHECK_ID>
+```
+
+### Step 6 — Commit and Push
+
+```bash
+git add .
+
+git commit -m "Update infrastructure"
+
+git push origin feature/my-change
+```
+
+### Step 7 — Create Pull Request
+
+Create a PR from:
+
+```text
+feature/my-change → main
+```
+
+The validation pipeline runs automatically.
+
+### Step 8 — Review and Approve
+
+Review the Terraform plan and pipeline results.
+
+After approval, merge the PR into `main`.
+
+### Step 9 — Deployment
+
+The deployment pipeline starts for the configured environment.
+
+The `terraform-preprod` environment requires manual approval.
+
+After approval:
+
+```text
+terraform apply
+```
+
+runs and creates/updates the Azure infrastructure.
+
+---
+
+## Checkov Security Scan
+
+Checkov is used to scan Terraform code for security issues.
 
 Example:
+
+```bash
+checkov -d .
+```
+
+During this learning project, some checks were skipped because they represent production-level features that are outside the current project scope.
+
+For example:
 
 ```text
 CKV2_AZURE_1
@@ -214,272 +416,208 @@ CKV2_AZURE_33
 CKV2_AZURE_41
 ```
 
-Ye mostly production-level security recommendations the, jaise:
+These exceptions should not automatically be used in production.
 
-* Customer Managed Key
-* Private Endpoint
-* Storage logging
-* Replication
-* Shared Key restriction
-* SAS expiration policy
-* Public access restriction
-
-Learning project ke scope mein sab implement karna unnecessary tha.
+In a production project, the recommended approach is to understand and fix the security finding wherever possible.
 
 ---
 
-# 9. Terraform Storage Account Security Improvements
+## Azure RBAC Troubleshooting
 
-Storage Account module mein practical security settings add ki:
-
-```hcl
-min_tls_version                 = "TLS1_2"
-allow_nested_items_to_be_public = false
-
-blob_properties {
-  delete_retention_policy {
-    days = 7
-  }
-
-  container_delete_retention_policy {
-    days = 7
-  }
-}
-```
-
-Isse kuch Checkov checks pass hue.
-
----
-
-# 10. Checkov Exceptions
-
-Learning project ke liye intentionally unsupported checks ko pipeline command mein skip kiya:
-
-```powershell
-checkov -d . --skip-check CKV2_AZURE_1,CKV_AZURE_59,CKV_AZURE_33,CKV_AZURE_206,CKV2_AZURE_40,CKV2_AZURE_33,CKV2_AZURE_41
-```
-
-Important:
-
-Checkov skip ka matlab security issue solve karna nahi hai.
-
-Ye sirf:
+One important issue faced during this project was:
 
 ```text
-"Known exception for this learning project"
+403 AuthorizationFailed
 ```
 
-ke liye hai.
-
-Production project mein proper justification + actual remediation preferred hai.
-
----
-
-# 11. Terraform Formatting
-
-Pipeline/local validation se pehle:
-
-```powershell
-terraform fmt -recursive
-```
-
-Isse Terraform files automatically standard format mein aa gayi.
-
----
-
-# 12. Local Checkov Validation
-
-Final local scan:
-
-```powershell
-checkov -d . --skip-check CKV2_AZURE_1,CKV_AZURE_59,CKV_AZURE_33,CKV_AZURE_206,CKV2_AZURE_40,CKV2_AZURE_33,CKV2_AZURE_41
-```
-
-Result:
+Example:
 
 ```text
-Terraform:
-Passed checks: 8
-Failed checks: 0
-
-Azure Pipelines:
-Passed checks: 2
-Failed checks: 0
+does not have authorization to perform action
+Microsoft.Resources/subscriptions/resourceGroups/read
 ```
 
-Therefore local security validation successful.
+### Cause
 
----
+The Azure DevOps service connection identity did not have the required Azure permissions.
 
-# 13. Final Git Flow
+### Resolution
 
-Changes ko feature branch par commit kiya:
+The service connection identity was given the required RBAC role at the appropriate scope.
 
-```powershell
-git status
-git add .
-git commit -m "Update Checkov security validation"
-git push origin feature/terraform-pipeline
-```
-
-Then:
-
-```text
-feature/terraform-pipeline
-          ↓
-          PR
-          ↓
-   Build Validation
-          ↓
-        Approval
-          ↓
-       Merge main
-```
-
----
-
-# 14. Final CI/CD Flow
-
-Final pipeline architecture:
-
-```text
-Developer
-   ↓
-Feature Branch
-   ↓
-Push Code
-   ↓
-Create PR
-   ↓
-Build Validation
-   ├── Terraform fmt
-   ├── Terraform init
-   ├── Terraform validate
-   ├── Checkov scan
-   └── Terraform plan
-   ↓
-PR Approval
-   ↓
-Merge to main
-   ↓
-Deploy Pipeline
-   ↓
-terraform-preprod Environment
-   ↓
-Manual Approval
-   ↓
-Terraform Apply
-   ↓
-Azure Resources
-```
-
----
-
-# 15. Important Troubleshooting Lessons
-
-### 403 AuthorizationFailed
+For this learning project, `Contributor` access at the subscription scope was used.
 
 Always check:
 
 ```text
-Which identity is Terraform using?
-        ↓
 Service Connection
-        ↓
-Object ID
-        ↓
-Azure IAM role
-        ↓
+       |
+       v
+Identity / Object ID
+       |
+       v
+Azure IAM
+       |
+       v
+Role
+       |
+       v
 Scope
 ```
 
-Role assignment sirf naam dekh kar assume nahi karna.
+Also allow some time for Azure RBAC changes to propagate before rerunning the pipeline.
 
-Check exact scope:
+---
 
-```text
-Subscription
-Resource Group
-Storage Account
+## Useful Troubleshooting Commands
+
+Check the current Git branch:
+
+```bash
+git branch
+```
+
+Check Git status:
+
+```bash
+git status
+```
+
+Check remote branches:
+
+```bash
+git fetch origin
+git branch -a
+```
+
+Check recent commits:
+
+```bash
+git log --oneline -5
+```
+
+Format Terraform:
+
+```bash
+terraform fmt -recursive
+```
+
+Validate Terraform:
+
+```bash
+terraform validate
+```
+
+Run Checkov:
+
+```bash
+checkov -d .
 ```
 
 ---
 
-### Terraform backend error
+## Important Lessons
 
-Agar `terraform init` mein Storage Account 403 aaye:
+### 1. Pipeline YAML should be stored in Git
 
-```text
-Microsoft.Storage/storageAccounts/read
-```
+Keeping the pipeline YAML inside the repository provides:
 
-toh backend storage par service connection identity ki permission check karo.
+* Version history
+* Code review
+* Change tracking
+* Easy rollback
 
----
+### 2. PR validation protects the main branch
 
-### Resource Group error
+Terraform changes should be validated before merging.
 
-Agar:
+### 3. Plan and Apply should be controlled
 
-```text
-Microsoft.Resources/subscriptions/resourceGroups/read
-```
+`terraform plan` helps review infrastructure changes.
 
-aaye, toh Azure subscription/resource-group level RBAC check karo.
+`terraform apply` should be protected with an approval process.
 
----
+### 4. Azure RBAC matters
 
-### Checkov failure
+A successful service connection does not automatically mean Terraform has permission to access every Azure resource.
 
-Har Checkov failure ko blindly skip nahi karna.
+### 5. Security scans should be understood
 
-Process:
+Do not blindly skip Checkov failures.
 
-```text
-Checkov failure
-      ↓
-Understand policy
-      ↓
-Can we fix it?
-      ↓
-YES → Terraform configuration improve
-      ↓
-NO / Not required for learning scope
-      ↓
-Documented skip
-```
+First understand the finding and decide whether it should be fixed or documented as an exception.
 
 ---
 
-# 16. Final Learning
+## Current Project Status
 
-Is project se following concepts practically cover hue:
-
-* Git feature branching
-* PR-based development
-* Branch policies
-* Build validation
-* Azure DevOps YAML pipelines
-* Self-hosted agent
-* Azure Service Connection
-* Workload Identity Federation
-* Azure RBAC
-* Terraform modules
-* Terraform backend
-* Terraform init
-* Terraform validate
-* Terraform plan
-* Terraform apply
-* Checkov security scanning
-* ADO Environment
-* Manual approvals
-* CI/CD workflow
-* Troubleshooting 403 authorization errors
-
-**Final principle:**
+The following flow has been successfully tested:
 
 ```text
-Code → Validate → Scan → Plan → Review → Approve → Merge → Deploy → Apply
+Feature Branch
+      ↓
+Pull Request
+      ↓
+Build Validation
+      ↓
+Terraform fmt        ✅
+Terraform init       ✅
+Terraform validate   ✅
+Checkov              ✅
+Terraform plan       ✅
+      ↓
+PR Approval          ✅
+      ↓
+Merge to main        ✅
+      ↓
+Deployment           ✅
+      ↓
+Manual Approval      ✅
+      ↓
+Terraform Apply      ✅
+      ↓
+Azure Deployment     ✅
 ```
 
-Ye flow Infrastructure-as-Code ke liye ek solid learning-level CI/CD foundation hai.
+---
+
+## Future Improvements
+
+Possible next steps for this project:
+
+* Separate CI and CD pipelines
+* Proper Preprod and Prod deployment stages
+* Separate Terraform state for each environment
+* Terraform plan artifact
+* Secure secrets management
+* Azure Key Vault integration
+* More Checkov findings fixed instead of skipped
+* Private Endpoint implementation
+* Customer Managed Key encryption
+* Production-level RBAC
+* Remote state locking and governance
+* Deployment notifications
+
+---
+
+## Goal
+
+The main goal of this project is to understand how Terraform infrastructure can be safely:
+
+```text
+Developed
+   ↓
+Validated
+   ↓
+Security Scanned
+   ↓
+Planned
+   ↓
+Reviewed
+   ↓
+Approved
+   ↓
+Deployed
+```
+
+This is a **learning project** and is not intended to be a production-ready infrastructure setup.
