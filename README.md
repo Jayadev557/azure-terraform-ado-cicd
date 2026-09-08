@@ -174,6 +174,8 @@ Remote state helps keep Terraform state outside the Git repository.
 
 ## CI/CD Pipeline
 
+![Pipeline Run](docs/pipeline-run.png)
+
 The pipeline has two main stages.
 
 ### 1. Validation and Plan
@@ -208,6 +210,8 @@ terraform-preprod
 
 A manual approval is required before Terraform Apply.
 
+![Pipeline Run](docs/approval.png)
+
 ```text
 main
  |
@@ -223,6 +227,8 @@ Manual Approval
  v
 terraform apply
 ```
+
+![Pipeline Run](docs/deployment-success.png)
 
 ---
 
