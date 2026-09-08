@@ -1,0 +1,196 @@
+# ============================================================
+# Terraform CI/CD Pipeline
+# Self-hosted Windows Agent
+# ============================================================
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+
+# ============================================================
+# AGENT
+# ============================================================
+
+pool:
+  name: jdpipelinepool
+
+
+# ============================================================
+# VARIABLES
+# ============================================================
+
+variables:
+  terraformWorkingDirectory: '$(Build.SourcesDirectory)\environment\preprod'
+
+
+# ============================================================
+# STAGES
+# ============================================================
+
+stages:
+
+# ============================================================
+# STAGE 1 - VALIDATION & PLAN
+# ============================================================
+
+- stage: TerraformValidation
+  displayName: 'Terraform Validation & Plan'
+
+  jobs:
+
+  - job: TerraformValidationJob
+    displayName: 'Terraform Validation'
+
+    steps:
+
+    # --------------------------------------------------------
+    # Terraform Version
+    # --------------------------------------------------------
+
+    - powershell: |
+        terraform version
+      displayName: 'Terraform Version'
+
+
+    # --------------------------------------------------------
+    # Terraform Format Check
+    # --------------------------------------------------------
+
+    - powershell: |
+        Set-Location "$(terraformWorkingDirectory)"
+
+        terraform fmt -check -recursive
+      displayName: 'Terraform Format Check'
+
+
+    # --------------------------------------------------------
+    # Terraform Init + Validate + Plan
+    # --------------------------------------------------------
+
+    - task: AzureCLI@2
+      displayName: 'Terraform Init Validate Plan'
+      inputs:
+        azureSubscription: 'jdpipeline'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+
+          Write-Host "Azure authentication successful"
+
+          az account show
+
+          Set-Location "$(terraformWorkingDirectory)"
+
+          Write-Host "======================================"
+          Write-Host "Terraform Init"
+          Write-Host "======================================"
+
+          terraform init
+
+          Write-Host "======================================"
+          Write-Host "Terraform Validate"
+          Write-Host "======================================"
+
+          terraform validate
+
+          Write-Host "======================================"
+          Write-Host "Terraform Plan"
+          Write-Host "======================================"
+
+          terraform plan `
+            -var-file="terraform.tfvars"
+
+
+    # --------------------------------------------------------
+    # Checkov Security Scan
+    # --------------------------------------------------------
+
+    - powershell: |
+        Set-Location "$(terraformWorkingDirectory)"
+
+        checkov -d . --skip-check CKV2_AZURE_1,CKV_AZURE_59,CKV_AZURE_33,CKV_AZURE_206,CKV2_AZURE_40,CKV2_AZURE_33,CKV2_AZURE_41
+      displayName: 'Checkov Security Scan'
+
+
+# ============================================================
+# STAGE 2 - DEPLOYMENT
+# ============================================================
+
+- stage: TerraformDeploy
+  displayName: 'Terraform Deploy'
+
+  dependsOn: TerraformValidation
+
+  condition: succeeded()
+
+  jobs:
+
+  - deployment: TerraformApply
+    displayName: 'Terraform Apply'
+
+    environment: 'terraform-preprod'
+
+    strategy:
+
+      runOnce:
+
+        deploy:
+
+          steps:
+
+          # --------------------------------------------------
+          # Terraform Version
+          # --------------------------------------------------
+
+          - powershell: |
+              terraform version
+            displayName: 'Terraform Version'
+
+
+          # --------------------------------------------------
+          # Azure Authentication + Terraform Init/Plan/Apply
+          # --------------------------------------------------
+
+          - task: AzureCLI@2
+            displayName: 'Terraform Init Plan Apply'
+            inputs:
+              azureSubscription: 'jdpipeline'
+              scriptType: 'ps'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+
+                Write-Host "Azure authentication successful"
+
+                az account show
+
+                Set-Location "$(terraformWorkingDirectory)"
+
+                Write-Host "======================================"
+                Write-Host "Terraform Init"
+                Write-Host "======================================"
+
+                terraform init
+
+                Write-Host "======================================"
+                Write-Host "Terraform Plan"
+                Write-Host "======================================"
+
+                terraform plan `
+                  -var-file="terraform.tfvars" `
+                  -out=tfplan
+
+                Write-Host "======================================"
+                Write-Host "Terraform Apply"
+                Write-Host "======================================"
+
+                terraform apply `
+                  -auto-approve `
+                  tfplan
+
